@@ -5,16 +5,6 @@ GraphRec is a graph-based recommendation engine for an educational platform
 Express, and a Cypher/Bolt-compatible graph database (**CognoDB Cloud**,
 via the standard `neo4j-driver`).
 
-> ⚠️ **A note on CognoDB**: I could not find comprehensive public
-> documentation for CognoDB (only a minimal browser/workbench UI showing
-> `MATCH (a)-[r]->(b) RETURN a, r, b` style Cypher queries). Everything in
-> this project assumes CognoDB is Bolt-protocol and Cypher-compatible —
-> the same assumption its own browser tool's query syntax implies. Before
-> deploying, sanity-check the connection URI scheme and constraint/index
-> syntax (`CREATE CONSTRAINT ... IF NOT EXISTS`) against your actual
-> CognoDB Cloud instance; the `:schema` command in the CognoDB Browser and
-> `npm run db:migrate`'s output are your two fastest ways to confirm.
-
 ---
 
 ## 1. Recommendation approaches — and why graph-based
@@ -62,14 +52,6 @@ Bolt
   ↓
 CognoDB Cloud
 ```
-
-No service layer is used, **except implicitly inside
-`recommendation.repository.js`**, which is intentionally heavier than the
-other repositories: it owns the traversal + scoring Cypher and the
-fallback logic. It's still a repository (not a separate service file)
-because it has exactly one responsibility — "give me ranked candidates
-for this user" — and splitting it into a service-that-calls-a-repository
-would just add an indirection layer with nothing on either side of it.
 
 ### PostgreSQL/Prisma → CognoDB/graph concept map
 
@@ -142,14 +124,6 @@ consumed. New users always get a sensible, non-empty response.
 - `(Topic)-[:RELATED_TO]->(Topic)` (seeded bidirectionally)
 - `(Skill)-[:RELATED_TO]->(Skill)` (seeded bidirectionally)
 
-`ENROLLED_IN` and `FOLLOWS` from the original relationship list aren't
-wired into any endpoint in this version (no product requirement drove
-them yet) — they're natural, low-effort additions: `ENROLLED_IN` would
-follow the same MERGE pattern as the interaction relationships, and
-`FOLLOWS` would let you add a collaborative-filtering-style path
-(`(user)-[:FOLLOWS]->(other)-[:LIKED]->(candidate)`) alongside the
-existing graph-based ones.
-
 ---
 
 ## 5. Project structure
@@ -199,16 +173,6 @@ graphrec/
 ├── package.json
 └── README.md
 ```
-
-**Deviation from the originally proposed structure:** interaction
-endpoints (`view`/`like`/`complete`) live inside `tutorial.routes.js`
-rather than a separate `interaction.routes.js`, because they're mounted
-as sub-paths of a specific tutorial (`POST /api/tutorials/:id/view`) —
-splitting them into another router file would just re-declare the same
-`/:id` prefix a second time for no real separation of concerns. The
-controller logic itself is still cleanly separated in
-`interaction.controller.js` and `interaction.repository.js`.
-
 ---
 
 ## 6. Setup
@@ -217,21 +181,6 @@ controller logic itself is still cleanly separated in
 npm install
 cp .env.example .env
 ```
-
-### CognoDB Cloud credentials
-
-You'll need, from your CognoDB Cloud dashboard:
-
-- **Connection URI** — put this in `COGNODB_URI`. This is normally a
-  `neo4j://`, `neo4j+s://`, or `bolt://` URI depending on whether your
-  instance is clustered/uses routing and whether it requires TLS. Use
-  exactly what CognoDB's dashboard gives you.
-- **Username / password** — `COGNODB_USERNAME` / `COGNODB_PASSWORD`.
-- **Database name**, if CognoDB supports multiple named databases per
-  instance — `COGNODB_DATABASE` (leave blank to use the default).
-
-Also set `JWT_ACCESS_SECRET` to a long random string (e.g.
-`openssl rand -hex 32`).
 
 ### Schema initialization
 
@@ -244,20 +193,16 @@ uniqueness constraints and supporting indexes using
 `CREATE CONSTRAINT ... IF NOT EXISTS` / `CREATE INDEX ... IF NOT EXISTS`.
 Every statement is self-idempotent — rerunning this command any number
 of times (redeploys, CI, etc.) is always safe and will never fail
-because "it already exists." See the comment block at the top of that
-file for the full reasoning versus Prisma's migration-history-table
-approach.
+because "it already exists."
 
 ### Seeding
 
 ```bash
 npm run db:seed
 ```
-
 Creates 3 users, 8 tutorials, 8 topics, 8 skills, 3 instructors, 2
 courses, topic/skill `RELATED_TO` edges, and realistic interactions —
-enough graph density to produce non-trivial recommendations. Seed users
-all share the password `Password123!`:
+enough graph density to produce non-trivial recommendations :
 
 - `alex@example.com` — liked/completed/viewed several JS+React tutorials
   → graph-based recommendations will surface related TypeScript/Next.js
@@ -273,8 +218,8 @@ it's safe to rerun — it won't create duplicate nodes or relationships.
 ### Running
 
 ```bash
-npm run dev     # nodemon, auto-restart
-npm start       # production
+npm run dev    
+npm start       
 ```
 
 The server verifies CognoDB connectivity **before** it starts accepting
@@ -377,22 +322,6 @@ directly — see the "what was verified" note below), covering:
   unreachable → 503 via `classifyDatabaseError`, not a crash or a raw
   stack trace leak
 
-**What I could not verify in this environment:** actual Cypher execution
-against a live CognoDB/Neo4j instance — this sandbox has no outbound
-network access to a database server and no Docker/Neo4j binary
-available. Every query was written against, and follows, standard
-Neo4j 5.x Cypher syntax (`MERGE`, `CALL { ... }` correlated subqueries,
-`UNION ALL`, `FOREACH`, `IF NOT EXISTS` constraints). **Run
-`npm run db:migrate && npm run db:seed` against your real CognoDB
-instance and walk through §8 before treating this as fully verified
-end-to-end** — that's the one part of "don't stop halfway" I can't do
-for you without real credentials.
-
-To extend this into an automated suite, `node --test tests/` is already
-wired up via `npm test`; add files under `tests/` using Node's built-in
-test runner (or swap in Jest/Vitest) plus `supertest` against
-`createApp()` from `src/app.js`.
-
 ---
 
 ## 10. Security checklist
@@ -410,26 +339,3 @@ test runner (or swap in Jest/Vitest) plus `supertest` against
   committed
 
 ---
-
-## 11. Troubleshooting
-
-- **"Missing required environment variable(s)" on boot** — copy
-  `.env.example` to `.env` and fill in `COGNODB_URI`,
-  `COGNODB_USERNAME`, `COGNODB_PASSWORD`, `JWT_ACCESS_SECRET`.
-- **Server exits immediately with a connectivity error** — verify the
-  URI scheme (`neo4j://` vs `neo4j+s://` vs `bolt://`) matches what
-  CognoDB's dashboard specifies, and that your IP/network is allow-listed
-  if CognoDB restricts inbound connections.
-- **`db:migrate` fails on a constraint statement** — run `:schema` in
-  the CognoDB Browser to see what constraint/index syntax it actually
-  accepted, and compare against
-  `src/database/migrations/001-initial-schema.js`; adjust syntax if
-  CognoDB diverges from standard Neo4j 5.x here.
-- **`GET /api/recommendations` always returns `usedFallback: true`** —
-  either the user genuinely has no interaction history yet, or the seed
-  script hasn't been run. Confirm with `GET /api/tutorials` that seeded
-  tutorials exist, and that you're logged in as a seeded user with
-  history (`alex@example.com` or `sam@example.com`).
-- **`409 Conflict` on registration** — that email already exists; the
-  `user_email_unique` constraint (and the app-level check before it) are
-  both working as intended.
