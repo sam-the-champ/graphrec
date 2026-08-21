@@ -21,7 +21,7 @@ export async function listTutorials(req, res, next) {
 
 export async function getTutorial(req, res, next) {
   try {
-    const tutorial = await tutorialRepository.findById(req.params.id);
+    const tutorial = await tutorialRepository.findById(req.params.id, req.user?.id);
     if (!tutorial) {
       throw ApiError.notFound(`Tutorial ${req.params.id} not found`);
     }

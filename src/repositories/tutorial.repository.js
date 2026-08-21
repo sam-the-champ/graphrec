@@ -91,7 +91,7 @@ export async function createTutorial({
   });
 }
 
-export async function findById(id) {
+export async function findById(id, userId = null) {
   return withSession('READ', async (session) => {
     const result = await session.executeRead((tx) =>
       tx.run(
@@ -101,13 +101,25 @@ export async function findById(id) {
         OPTIONAL MATCH (t)-[:TEACHES]->(skill:Skill)
         OPTIONAL MATCH (t)-[:TAUGHT_BY]->(instructor:Instructor)
         OPTIONAL MATCH (course:Course)-[:CONTAINS]->(t)
+
+        // userId is null for anonymous requests (see optionalAuth) — in
+        // that case this simply never matches, so all three flags below
+        // correctly come back false rather than needing separate branching.
+        OPTIONAL MATCH (currentUser:User {id: $userId})
+        OPTIONAL MATCH (currentUser)-[viewedRel:VIEWED]->(t)
+        OPTIONAL MATCH (currentUser)-[likedRel:LIKED]->(t)
+        OPTIONAL MATCH (currentUser)-[completedRel:COMPLETED]->(t)
+
         RETURN t,
                collect(DISTINCT topic {.id, .name, .slug}) AS topics,
                collect(DISTINCT skill {.id, .name, .slug}) AS skills,
                instructor {.id, .name} AS instructor,
-               course {.id, .title} AS course
+               course {.id, .title} AS course,
+               count(DISTINCT viewedRel) > 0 AS userHasViewed,
+               count(DISTINCT likedRel) > 0 AS userHasLiked,
+               count(DISTINCT completedRel) > 0 AS userHasCompleted
         `,
-        { id }
+        { id, userId }
       )
     );
     if (result.records.length === 0) return null;
@@ -118,6 +130,9 @@ export async function findById(id) {
       skills: toPlainValue(record.get('skills')).filter((s) => s.id),
       instructor: record.get('instructor')?.id ? toPlainValue(record.get('instructor')) : null,
       course: record.get('course')?.id ? toPlainValue(record.get('course')) : null,
+      userHasViewed: record.get('userHasViewed'),
+      userHasLiked: record.get('userHasLiked'),
+      userHasCompleted: record.get('userHasCompleted'),
     };
   });
 }

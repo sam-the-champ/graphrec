@@ -29,3 +29,27 @@ export function requireAuth(req, res, next) {
     return next(ApiError.unauthorized('Invalid token'));
   }
 }
+
+
+export function optionalAuth(req, res, next) {
+  const header = req.headers.authorization;
+
+  if (!header || !header.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = header.slice('Bearer '.length).trim();
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const decoded = verifyAccessToken(token);
+    req.user = { id: decoded.sub };
+  } catch {
+    // Invalid/expired token on a public route: treat as anonymous
+    // rather than rejecting the request.
+  }
+
+  return next();
+}

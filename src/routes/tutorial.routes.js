@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as tutorialController from '../controllers/tutorial.controller.js';
 import * as interactionController from '../controllers/interaction.controller.js';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import {
   createTutorialSchema,
@@ -18,7 +18,7 @@ const router = Router();
 // keeping writes behind auth avoids an open write API to the public.
 router.post('/', requireAuth, validate(createTutorialSchema), tutorialController.createTutorial);
 router.get('/', validate(listTutorialsSchema), tutorialController.listTutorials);
-router.get('/:id', validate(tutorialIdParamSchema), tutorialController.getTutorial);
+router.get('/:id', optionalAuth, validate(tutorialIdParamSchema), tutorialController.getTutorial);
 router.patch(
   '/:id',
   requireAuth,
