@@ -16,6 +16,11 @@ const router = Router();
 
 router.post('/', requireAuth, validate(createTutorialSchema), tutorialController.createTutorial);
 router.get('/', validate(listTutorialsSchema), tutorialController.listTutorials);
+router.get(
+  '/debug/:userId/:tutorialId',
+  requireAuth,
+  tutorialController.debugInteraction
+);
 router.get('/:id', optionalAuth, validate(tutorialIdParamSchema), tutorialController.getTutorial);
 router.patch(
   '/:id',

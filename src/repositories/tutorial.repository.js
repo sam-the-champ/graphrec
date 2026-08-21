@@ -93,50 +93,164 @@ export async function createTutorial({
 
 export async function findById(id, userId = null) {
   return withSession('READ', async (session) => {
-    const result = await session.executeRead((tx) =>
+    // --------------------------------------------------
+    // 1. Get the tutorial itself
+    // --------------------------------------------------
+    const tutorialResult = await session.executeRead((tx) =>
       tx.run(
         `
         MATCH (t:Tutorial {id: $id})
+
         OPTIONAL MATCH (t)-[:ABOUT]->(topic:Topic)
         OPTIONAL MATCH (t)-[:TEACHES]->(skill:Skill)
         OPTIONAL MATCH (t)-[:TAUGHT_BY]->(instructor:Instructor)
         OPTIONAL MATCH (course:Course)-[:CONTAINS]->(t)
 
-        // userId is null for anonymous requests (see optionalAuth) — in
-        // that case this simply never matches, so all three flags below
-        // correctly come back false rather than needing separate branching.
-        OPTIONAL MATCH (currentUser:User {id: $userId})
-        OPTIONAL MATCH (currentUser)-[viewedRel:VIEWED]->(t)
-        OPTIONAL MATCH (currentUser)-[likedRel:LIKED]->(t)
-        OPTIONAL MATCH (currentUser)-[completedRel:COMPLETED]->(t)
-
         RETURN t,
                collect(DISTINCT topic {.id, .name, .slug}) AS topics,
                collect(DISTINCT skill {.id, .name, .slug}) AS skills,
                instructor {.id, .name} AS instructor,
-               course {.id, .title} AS course,
-               count(DISTINCT viewedRel) > 0 AS userHasViewed,
-               count(DISTINCT likedRel) > 0 AS userHasLiked,
-               count(DISTINCT completedRel) > 0 AS userHasCompleted
+               course {.id, .title} AS course
         `,
-        { id, userId }
+        { id }
       )
     );
-    if (result.records.length === 0) return null;
+
+    if (tutorialResult.records.length === 0) {
+      return null;
+    }
+
+    const record = tutorialResult.records[0];
+    const tutorialNode = record.get('t');
+
+    if (!tutorialNode) {
+      return null;
+    }
+
+    // --------------------------------------------------
+    // 2. Build the tutorial response
+    // --------------------------------------------------
+    const tutorial = {
+      ...toPlainObject(tutorialNode.properties),
+
+      topics: toPlainValue(record.get('topics')).filter(
+        (topic) => topic?.id
+      ),
+
+      skills: toPlainValue(record.get('skills')).filter(
+        (skill) => skill?.id
+      ),
+
+      instructor: record.get('instructor')?.id
+        ? toPlainValue(record.get('instructor'))
+        : null,
+
+      course: record.get('course')?.id
+        ? toPlainValue(record.get('course'))
+        : null,
+
+      // Anonymous users start with no interaction state.
+      userHasViewed: false,
+      userHasLiked: false,
+      userHasCompleted: false,
+    };
+
+    // --------------------------------------------------
+    // 3. Anonymous user?
+    // --------------------------------------------------
+    if (!userId) {
+      return tutorial;
+    }
+
+    // --------------------------------------------------
+    // 4. Get ALL interactions belonging to THIS user
+    // --------------------------------------------------
+    const interactionResult = await session.executeRead((tx) =>
+      tx.run(
+        `
+        MATCH (user:User {id: $userId})
+
+        OPTIONAL MATCH (user)-[:VIEWED]->(viewedTutorial:Tutorial)
+        OPTIONAL MATCH (user)-[:LIKED]->(likedTutorial:Tutorial)
+        OPTIONAL MATCH (user)-[:COMPLETED]->(completedTutorial:Tutorial)
+
+        RETURN
+          collect(DISTINCT viewedTutorial.id) AS viewedTutorialIds,
+          collect(DISTINCT likedTutorial.id) AS likedTutorialIds,
+          collect(DISTINCT completedTutorial.id) AS completedTutorialIds
+        `,
+        {
+          userId,
+        }
+      )
+    );
+
+    const interactionRecord = interactionResult.records[0];
+
+    if (!interactionRecord) {
+      return tutorial;
+    }
+
+    const viewedTutorialIds = toPlainValue(
+      interactionRecord.get('viewedTutorialIds')
+    ).filter(Boolean);
+
+    const likedTutorialIds = toPlainValue(
+      interactionRecord.get('likedTutorialIds')
+    ).filter(Boolean);
+
+    const completedTutorialIds = toPlainValue(
+      interactionRecord.get('completedTutorialIds')
+    ).filter(Boolean);
+
+    // --------------------------------------------------
+    // 5. Compare IDs in JavaScript
+    // --------------------------------------------------
+    tutorial.userHasViewed = viewedTutorialIds.includes(id);
+    tutorial.userHasLiked = likedTutorialIds.includes(id);
+    tutorial.userHasCompleted = completedTutorialIds.includes(id);
+
+    return tutorial;
+  });
+}
+export async function debugInteraction(userId, tutorialId) {
+  return withSession('READ', async (session) => {
+    const result = await session.executeRead((tx) =>
+      tx.run(
+        `
+        MATCH (u:User {id: $userId})
+        MATCH (t:Tutorial {id: $tutorialId})
+
+        OPTIONAL MATCH (u)-[viewed:VIEWED]->(t)
+        OPTIONAL MATCH (u)-[liked:LIKED]->(t)
+        OPTIONAL MATCH (u)-[completed:COMPLETED]->(t)
+
+        RETURN
+          u.id AS userId,
+          t.id AS tutorialId,
+
+          viewed IS NOT NULL AS viewed,
+          liked IS NOT NULL AS liked,
+          completed IS NOT NULL AS completed
+        `,
+        {
+          userId,
+          tutorialId,
+        }
+      )
+    );
+
     const record = result.records[0];
+
     return {
-      ...toPlainObject(record.get('t').properties),
-      topics: toPlainValue(record.get('topics')).filter((t) => t.id),
-      skills: toPlainValue(record.get('skills')).filter((s) => s.id),
-      instructor: record.get('instructor')?.id ? toPlainValue(record.get('instructor')) : null,
-      course: record.get('course')?.id ? toPlainValue(record.get('course')) : null,
-      userHasViewed: record.get('userHasViewed'),
-      userHasLiked: record.get('userHasLiked'),
-      userHasCompleted: record.get('userHasCompleted'),
+      userId: record.get('userId'),
+      tutorialId: record.get('tutorialId'),
+      viewed: record.get('viewed'),
+      liked: record.get('liked'),
+      completed: record.get('completed'),
     };
   });
 }
-
 export async function list({ difficulty, limit, offset }) {
   return withSession('READ', async (session) => {
     const result = await session.executeRead((tx) =>
@@ -144,17 +258,30 @@ export async function list({ difficulty, limit, offset }) {
         `
         MATCH (t:Tutorial)
         WHERE $difficulty IS NULL OR t.difficulty = $difficulty
+
         RETURN t
         ORDER BY t.createdAt DESC
         SKIP $offset
         LIMIT $limit
         `,
-        { difficulty: difficulty ?? null, limit, offset }
+        {
+          difficulty: difficulty ?? null,
+          limit,
+          offset,
+        }
       )
     );
-    return result.records.map((r) => toPlainObject(r.get('t').properties));
+
+    return result.records.map((record) => {
+      const tutorial = record.get('t');
+
+      if (!tutorial) return null;
+
+      return toPlainObject(tutorial.properties);
+    }).filter(Boolean);
   });
 }
+  
 
 export async function updateTutorial(id, updates) {
   const setFragments = Object.keys(updates)

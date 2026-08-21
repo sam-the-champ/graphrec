@@ -21,13 +21,23 @@ export async function listTutorials(req, res, next) {
 
 export async function getTutorial(req, res, next) {
   try {
-    // req.user is only set if optionalAuth found a valid token — pass
-    // undefined for anonymous visitors so the repository knows there's
-    // no "current user" to check liked/viewed/completed state against.
-    const tutorial = await tutorialRepository.findById(req.params.id, req.user?.id);
+    console.log('GET TUTORIAL');
+    console.log('params.id:', req.params.id);
+    console.log('user:', req.user);
+
+    const tutorial = await tutorialRepository.findById(
+      req.params.id,
+      req.user?.id ?? null
+    );
+
+    console.log('tutorial returned:', tutorial);
+
     if (!tutorial) {
-      throw ApiError.notFound(`Tutorial ${req.params.id} not found`);
+      throw ApiError.notFound(
+        `Tutorial ${req.params.id} not found`
+      );
     }
+
     return ok(res, { tutorial });
   } catch (err) {
     return next(err);
@@ -53,6 +63,22 @@ export async function deleteTutorial(req, res, next) {
       throw ApiError.notFound(`Tutorial ${req.params.id} not found`);
     }
     return ok(res, { deleted: true });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+
+export async function debugInteraction(req, res, next) {
+  try {
+    const { userId, tutorialId } = req.params;
+
+    const result = await tutorialRepository.debugInteraction(
+      userId,
+      tutorialId
+    );
+
+    return ok(res, result);
   } catch (err) {
     return next(err);
   }
