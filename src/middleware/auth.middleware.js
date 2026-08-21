@@ -1,10 +1,7 @@
 import { verifyAccessToken } from '../utils/jwt.js';
 import { ApiError } from '../utils/response.js';
 
-/**
- * Requires a valid `Authorization: Bearer <token>` header.
- * On success sets `req.user = { id: decoded.sub }`.
- */
+
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
 
@@ -30,7 +27,14 @@ export function requireAuth(req, res, next) {
   }
 }
 
-
+/**
+ * For routes that are public but want to know who's asking, if anyone.
+ * Unlike requireAuth, a missing/invalid/expired token is NOT an error
+ * here — it just means req.user stays unset (anonymous). Used on
+ * GET /api/tutorials/:id so it can report the CURRENT user's
+ * liked/viewed/completed state on that tutorial when they're logged in,
+ * while still working normally for logged-out visitors.
+ */
 export function optionalAuth(req, res, next) {
   const header = req.headers.authorization;
 

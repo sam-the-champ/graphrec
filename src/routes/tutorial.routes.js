@@ -13,9 +13,7 @@ import { interactionParamSchema } from '../validators/interaction.validator.js';
 
 const router = Router();
 
-// Tutorial creation requires auth so we know who authored it in principle;
-// this project doesn't track authorship on the Tutorial node itself, but
-// keeping writes behind auth avoids an open write API to the public.
+
 router.post('/', requireAuth, validate(createTutorialSchema), tutorialController.createTutorial);
 router.get('/', validate(listTutorialsSchema), tutorialController.listTutorials);
 router.get('/:id', optionalAuth, validate(tutorialIdParamSchema), tutorialController.getTutorial);
